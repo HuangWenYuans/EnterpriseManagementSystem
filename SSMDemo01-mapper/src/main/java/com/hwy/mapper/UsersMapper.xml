@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.hwy.mapper.UsersMapper">
+    <insert id="insertUser" parameterType="com.hwy.pojo.Users">
+        insert into people(name,age) values (#{name},#{age})
+    </insert>
+
+    <select id="selectUserAll" resultType="com.hwy.pojo.Users">
+        select * from people
+    </select>
+
+</mapper>
