@@ -1,7 +1,6 @@
 # 生产型企业信息化管理系统
 
-	该项目为大三下学期期末学习完web初级编程即servlet&jsp后的编程课设，经过对项目规模以及工作量的分析亦本着对未知知识的渴望，
-	此项目我采用的是未学习过的Spring+SpringMVC+Mybatis框架以及一些前端框架JQuery、Bootstrap等。
+	该项目为大三下学期期末学习完web初级编程即servlet&jsp后的编程课设，经过对项目规模以及工作量的分析亦本着对未知知识的渴望，此项目我采用的是未学习过的Spring+SpringMVC+Mybatis框架以及一些前端框架JQuery、Bootstrap等。
 
 
 |    author  |   黄文源  
