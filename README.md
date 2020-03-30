@@ -125,4 +125,399 @@
 \4. 导入成功后，访问localhost:8080/login，即可进入到登陆页面。
 
 
+**创建存储过程当往考勤表中插入一条用户签到数据时，自动填充出勤时间，出勤标志置为1**
+
+```sql
+DELIMITER $
+create procedure insert_attendance(IN userid int(11))
+BEGIN
+insert into t_attendance(id,userid,attendancedate,attendanceflag) 
+values(default,userid,NOW(),1);
+END $
+```
+
+调用：
+
+```sql
+call  insert_attendance(1);
+```
+
+
+
+****
+
+**用户表触发器当新增一个员工时，对应部门人数+1**
+
+------
+
+```sql
+CREATE TRIGGER `insert_user1` AFTER INSERT ON `t_user` FOR EACH ROW 
+
+update  t_department set  departmentmember = departmentmember + 1 
+where departmentname = new.departmentname
+```
+
+
+
+**用户表触发器当删除一个员工时，对应部门人数-1**
+
+```sql
+CREATE TRIGGER `delete_user1` AFTER delete ON `t_user` FOR EACH ROW 
+
+update  t_department set  departmentmember = departmentmember - 1 
+where departmentname = old.departmentname
+
+
+```
+
+**创建存储过程通过输入部门名称和年份统计某部门全年的工资**
+
+```sql
+DELIMITER $
+create procedure dept_yearsalary(IN deptname varchar(50),IN year int)
+BEGIN
+select sum(t_salary.realsalary)
+from t_user,t_salary
+where  t_user.userid = t_salary.userid and DATE_FORMAT(`month`,'%Y') = year and t_user.departmentname = deptname
+group by deptname;
+END $
+
+```
+
+调用
+
+```sql
+call dept_yearsalary('销售部',2019);
+```
+
+
+
+**创建存储过程通过输入userid和年份查看某员工某年的工资并返回某一年的工资**
+
+```sql
+DELIMITER $
+create procedure user_yearsalary(IN userid int,IN year int)
+BEGIN
+select sum(t_salary.realsalary)
+from t_user,t_salary
+where userid = t_user.userid and t_user.userid = t_salary.userid and DATE_FORMAT(month,'%Y') = year
+group by t_user.realname;
+END $
+```
+
+调用
+
+```sql
+call user_yearsalary(1,2019);
+
+
+```
+
+
+
+**创建存储过程，查看某员工某个月的工资**
+
+```sql
+DELIMITER $
+create procedure user_monthsalary(IN userid int,IN month date)
+BEGIN
+declare absencefine decimal(10,2) DEFAULT 0;#缺勤扣除
+declare attendanceday int DEFAULT 0;#缺勤天数
+declare positionsalary decimal(10,2) DEFAULT 0;#岗位工资
+declare workagesalary decimal(10,2) DEFAULT 0;#工龄工资
+declare workage int DEFAULT 0;#工龄
+declare achievementsalary decimal(10,2) DEFAULT 0;#绩效工资
+declare salemoney decimal(10,2) DEFAULT 0;#月销售业绩
+declare taskmoney decimal(10,2) DEFAULT 0;#月规定业绩
+declare old decimal(10,2) DEFAULT 0;#养老保险
+declare medical decimal(10,2) DEFAULT 0;#医疗保险
+declare unemployment decimal(10,2) DEFAULT 0;#失业保险
+declare injury decimal(10,2) DEFAULT 0;#工商保险
+declare bear decimal(10,2) DEFAULT 0;#生育保险
+declare house decimal(10,2) DEFAULT 0;#住房公积金
+declare insurance decimal(10,2) DEFAULT 0;#五险一金
+declare beforetaxsalary decimal(10,2) DEFAULT 0;#税前工资
+declare rate double DEFAULT 0;#所得税税率
+declare tax decimal(10,2) DEFAULT 0;#个人所得税
+declare taxbase decimal(10,2) DEFAULT 0;#个人所得税应交部分
+declare shouldsalary decimal(10,2) DEFAULT 0;#税前工资
+declare realsalary decimal(10,2) DEFAULT 0;#税后工资
+declare realname varchar(50);#职工名
+
+  
+#查询出对应的职工名
+SELECT t_user.realname into realname
+from t_user WHERE t_user.userid = userid;
+
+
+#设置工龄工资
+select t_user.workage into workage#工龄
+from t_user
+where t_user.userid = userid;
+set workagesalary = workage * 100;#工龄工资
+
+select ifnull(sum(t_task.taskmoney),0) as sum into taskmoney#月规定业绩
+from t_task 
+where t_task.userid = userid and DATE_FORMAT(t_task.taskdate,'%Y-%m') = DATE_FORMAT(month,'%Y-%m');
+
+select ifnull(sum(t_salerecord.salemoney),0) into salemoney #月实际销售业绩
+from t_salerecord 
+where t_salerecord.userid = userid and DATE_FORMAT(t_salerecord.saletime,'%Y-%m') = DATE_FORMAT(month,'%Y-%m');
+
+#设置绩效工资
+  IF salemoney >= taskmoney
+  THEN set achievementsalary = 0.05 * (salemoney -taskmoney); #绩效工资
+  ELSE 
+  set achievementsalary = 0.1 * (salemoney-taskmoney); #绩效工资
+  END IF;
+  
+  select ifnull(salary,0) into positionsalary#岗位工资
+  from t_position,t_user
+  where t_position.position = t_user.position and t_user.userid = userid;
+	
+	
+	  
+	select count(*) into attendanceday #出勤天数
+	from t_attendance,t_salary 
+	where t_attendance.userid = userid and  DATE_FORMAT(t_attendance.attendancedate,'%Y-%m') = DATE_FORMAT(month,'%Y-%m') and t_attendance.attendanceflag=1;
+	
+	#设置缺勤扣除
+	set absencefine  = (1 - attendanceday / 30)* positionsalary;#缺勤扣除
+
+ #设置税前、五险一金前工资
+  set beforetaxsalary = positionsalary + achievementsalary + workagesalary - 
+  absencefine ;
+	
+ #五险一金
+ set old = beforetaxsalary*0.02;#养老保险
+ set medical = beforetaxsalary*0.08;#医疗保险
+ set unemployment = beforetaxsalary*0.01;#失业保险
+ set injury = 0;#工商保险
+ set bear =0;#生育保险
+ set house = beforetaxsalary*0.035;#住房公积金
+ set insurance = old+medical+unemployment+injury+bear+house;#五险一金总额
+ 
+ set taxbase = beforetaxsalary-insurance-5000;#所得税应缴纳部分
+
+  #个人所得税
+
+	CASE 
+
+       when taxbase >=0 and taxbase <=3000 
+       THEN 
+       SELECT t_tax.rate into rate from t_tax where t_tax.level = 1;
+       set tax = rate*taxbase ; 
+
+      when taxbase >3000 and taxbase <= 12000 
+      THEN 
+      SELECT t_tax.rate into rate from t_tax where t_tax.level = 2;
+      set tax = rate*taxbase-210;
+
+      when taxbase >12000 and taxbase <= 25000 
+      THEN 
+      SELECT t_tax.rate into rate from t_tax where t_tax.level = 3;
+      set tax = rate*taxbase-1410;
+
+     when taxbase >25000 and taxbase <= 35000 
+      THEN 
+      SELECT t_tax.rate into rate from t_tax where t_tax.level = 4;
+      set tax = rate*taxbase-2660;
+      
+     when taxbase >35000 and taxbase <= 55000 
+      THEN 
+      SELECT t_tax.rate into rate from t_tax where t_tax.level = 5;
+      set tax = rate*taxbase-4410;
+      
+            
+     when taxbase >55000 and taxbase <= 80000 
+      THEN 
+      SELECT t_tax.rate into rate from t_tax where t_tax.level = 6;
+      set tax = rate*taxbase-4410;
+      
+       when taxbase > 80000
+      THEN 
+      SELECT t_tax.rate into rate from t_tax where t_tax.level = 7;
+      set tax = rate*taxbase-15160;
+      
+	ELSE
+     set tax = 0;
+    END CASE;
+	
+
+   #设置税前工资
+   set shouldsalary = positionsalary + workagesalary + achievementsalary - absencefine - insurance;
+   #设置税后工资
+     set realsalary = positionsalary + workagesalary + achievementsalary - absencefine - insurance - tax;
+     #插入到工资表
+  insert ignore into t_salary(userid,realname,workagesalary,positionsalary,achievementsalary,absencefine,old,medical,unemployment,injury,bear,house,insurance,tax,shouldsalary,realsalary,month)
+  values(userid,realname,workagesalary,positionsalary,achievementsalary,absencefine,old,medical,unemployment,injury,bear,house,insurance,tax,shouldsalary,realsalary,DATE_FORMAT(month,'%Y-%m'));
+			#查出工资表中的所有数据
+	END $
+```
+
+调用存储过程
+
+```sql
+call user_monthsalary(1,'2019-01-11');
+```
+
+
+
+**创建存储过程统计月销售任务完成情况**
+
+```sql
+DELIMITER $
+CREATE PROCEDURE user_sale (IN userid INT,IN saletime VARCHAR(50),OUT rate double)
+BEGIN
+	DECLARE
+		salemoney DECIMAL ( 10, 2 );
+	DECLARE
+		taskmoney DECIMAL ( 10, 2 );
+
+	SELECT
+		sum(t_task.taskmoney) INTO taskmoney 
+	FROM
+		t_task 
+	WHERE
+		t_task.userid = userid 
+		AND DATE_FORMAT(t_task.taskdate,'%Y-%m')=DATE_FORMAT( saletime, '%Y-%m' );
+		
+	SELECT
+		sum(t_salerecord.salemoney) INTO salemoney 
+	FROM
+		t_salerecord 
+	WHERE
+		t_salerecord.userid = userid 
+		AND DATE_FORMAT( t_salerecord.saletime, '%Y-%m' ) = DATE_FORMAT( saletime,'%Y-%m');
+	
+	SET rate := salemoney / taskmoney;
+	SELECT rate;
+	END $
+```
+
+调用存储过程
+
+```
+call user_sale(1,'2019-01-10')
+```
+
+
+
+
+
+**查询员工年销售额存储过程**
+
+```sql
+DELIMITER $
+CREATE  PROCEDURE  year_sale(IN userid int,IN year varchar(50),OUT sum DECIMAL(10,2))
+
+BEGIN
+  DECLARE sum DECIMAL(10,2);
+	
+	select sum(salemoney) into sum
+	from t_salerecord where t_salerecord.userid = userid and DATE_FORMAT(saletime,'%Y') = year;
+	SELECT sum;
+	
+END $
+
+```
+
+调用
+
+```
+call year_sale(1,'2019',@sum);
+```
+
+
+
+
+
+**查询员工月销售额存储过程**
+
+```sql
+DELIMITER $
+CREATE  PROCEDURE  month_sale(IN userid int,IN month VARCHAR(50),OUT sum DECIMAL(10,2))
+
+BEGIN
+	DECLARE sum DECIMAL(10,2);
+	select sum(salemoney) into sum
+	from t_salerecord where t_salerecord.userid = userid and DATE_FORMAT(saletime,'%Y-%m') = month;
+	SELECT sum;
+END $
+
+
+
+```
+
+调用
+
+
+
+```
+call month_sale(1,'2019-01',@sum);
+```
+
+
+
+**查询月销售额前三名员工的编号，名字以及销售额**
+
+```sql
+select t_salerecord.userid,t_salerecord.realname,sum(salemoney) 
+	from t_salerecord where DATE_FORMAT(saletime,'%Y-%m') = '2019-03'  GROUP BY userid order by sum(salemoney) desc limit 0,3;
+
+```
+
+
+
+
+
+**查询员工年销售额前三名的编号、姓名、销售额**
+
+```sql
+   select t_salerecord.userid,t_salerecord.realname,sum(salemoney) as sum
+	  from t_salerecord where DATE_FORMAT(saletime,'%Y') = '2019'
+	  group by userid order by sum(salemoney) desc limit 0,3;
+```
+
+
+
+**创建存储过程，当用户往销售记录插入一条数据时，修改产品库存，计算出售的总额**
+
+```sql
+DELIMITER $
+CREATE  PROCEDURE sale(IN userid int,IN productid int,IN salecount int)
+
+BEGIN
+
+	DECLARE pname varchar(50);
+	DECLARE price DECIMAL(10,2);
+	DECLARE salemoney DECIMAL(10,2);
+	DECLARE uname VARCHAR(50);
+	SELECT t_product.`name` into pname
+	from t_product where productid = t_product.id;
+	
+	SELECT t_product.price into price
+	from t_product where productid = t_product.id;
+	
+	SELECT t_user.realname into uname
+	from t_user WHERE t_user.userid = userid;
+	
+	set salemoney = price * salecount;
+	
+	insert into t_salerecord(salerecordid,userid,realname,productid,productname,saletime,salecount,salemoney) values(DEFAULT,userid,uname,productid,pname,NOW(),salecount,salemoney);
+	update t_product set t_product.stock = t_product.stock - salecount
+    where t_product.id = productid;
+	
+END $
+
+```
+
+
+
+调用
+
+```
+call sale(1,1,5);
+```
+
 
